@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dynamic Foehn Forecast</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@1.4.0/dist/chartjs-plugin-annotation.min.js"></script>
+  <style>
+    body { font-family: sans-serif; max-width: 900px; margin: 2em auto; }
+    canvas { margin-bottom: 2em; }
+    select { font-size: 1em; margin-bottom: 1em; display: block; }
+  </style>
+</head>
+<body>
+  <label for="language-select"><strong id="language-label">Language:</strong></label>
+  <select id="language-select">
+    <option value="en">English</option>
+    <option value="fr">Français</option>
+    <option value="de">Deutsch</option>
+  </select>
+
+  <h1 id="page-title">Foehn Forecast - Dynamic Pressure Differences</h1>
+  <p id="refresh-timer" style="font-style: italic; color: gray;"></p>
+
+  <label for="model-select"><strong id="model-label">Select Forecast Model:</strong></label>
+  <select id="model-select">
+    <option value="gfs">GFS (NOAA)</option>
+    <option value="ecmwf">ECMWF</option>
+  </select>
+
+  <label for="region-select"><strong id="region-label">Select Region:</strong></label>
+  <select id="region-select"></select>
+
+  <canvas id="mainChart"></canvas>
+
+  <script>
+    const OPENWEATHER_API_KEY = '93a6eb58766b9fafc275cb3f4832fd90';
+
+    const translations = {
+      en: {
+        title: 'Foehn Forecast - Dynamic Pressure Differences',
+        language: 'Language:',
+        model: 'Select Forecast Model:',
+        region: 'Select Region:',
+        regions: {
+          axis1: 'Annecy (FR) – Aosta (IT)',
+          axis2: 'Zurich (CH) – Como (IT)',
+          axis3: 'Innsbruck (AT) – Bolzano (IT)'
+        },
+        chartLabel: (label) => `${label} Pressure Difference Forecast (hPa)`,
+        liveDiff: 'Live Pressure Difference',
+        xTitle: 'Time (Local)',
+        yTitle: 'hPa differential',
+        zones: {
+          safe: 'Safe to Fly',
+          redHigh: (city) => `${city} DO NOT FLY!`,
+          redLow: (city) => `${city} DO NOT FLY!`,
+          now: 'Now'
+        },
+        refresh: (m, s) => `Auto-refresh in ${m}m ${s < 10 ? '0' : ''}${s}s`
+      },
+      fr: {
+        title: 'Prévision du Foehn - Différences de Pression Dynamiques',
+        language: 'Langue :',
+        model: 'Sélectionnez le modèle de prévision :',
+        region: 'Sélectionnez la région :',
+        regions: {
+          axis1: 'Annecy (FR) – Aoste (IT)',
+          axis2: 'Zurich (CH) – Côme (IT)',
+          axis3: 'Innsbruck (AT) – Bolzano (IT)'
+        },
+        chartLabel: (label) => `Prévision des différences de pression ${label} (hPa)`,
+        liveDiff: 'Différence de pression en direct',
+        xTitle: 'Heure (locale)',
+        yTitle: 'Différentiel hPa',
+        zones: {
+          safe: 'Vol possible',
+          redHigh: (city) => `${city} NE PAS VOLER !`,
+          redLow: (city) => `${city} NE PAS VOLER !`,
+          now: 'Maintenant'
+        },
+        refresh: (m, s) => `Rafraîchissement automatique dans ${m}m ${s < 10 ? '0' : ''}${s}s`
+      },
+      de: {
+        title: 'Föhnvorhersage - Dynamische Druckunterschiede',
+        language: 'Sprache:',
+        model: 'Prognosemodell wählen:',
+        region: 'Region wählen:',
+        regions: {
+          axis1: 'Annecy (FR) – Aosta (IT)',
+          axis2: 'Zürich (CH) – Como (IT)',
+          axis3: 'Innsbruck (AT) – Bozen (IT)'
+        },
+        chartLabel: (label) => `${label} Druckdifferenz Prognose (hPa)`,
+        liveDiff: 'Aktuelle Druckdifferenz',
+        xTitle: 'Zeit (Lokal)',
+        yTitle: 'hPa-Differenz',
+        zones: {
+          safe: 'Flugbedingungen gut',
+          redHigh: (city) => `${city} NICHT FLIEGEN!`,
+          redLow: (city) => `${city} NICHT FLIEGEN!`,
+          now: 'Jetzt'
+        },
+        refresh: (m, s) => `Automatische Aktualisierung in ${m}m ${s < 10 ? '0' : ''}${s}s`
+      }
+    };
+
+    const locations = {
+      annecy: { lat: 45.9, lon: 6.116 },
+      aosta: { lat: 45.737, lon: 7.32 },
+      zurich: { lat: 47.3769, lon: 8.5417 },
+      como: { lat: 45.808, lon: 9.085 },
+      innsbruck: { lat: 47.2692, lon: 11.4041 },
+      bolzano: { lat: 46.4983, lon: 11.3548 }
+    };
+
+    const regionOptions = ['axis1', 'axis2', 'axis3'];
+    const elements = {
+      title: document.getElementById('page-title'),
+      languageLabel: document.getElementById('language-label'),
+      modelLabel: document.getElementById('model-label'),
+      regionLabel: document.getElementById('region-label'),
+      regionSelect: document.getElementById('region-select'),
+      refreshTimer: document.getElementById('refresh-timer')
+    };
+
+    let currentLang = localStorage.getItem('lang') || 'en';
+    let mainChart = null;
+    let chartData = {};
+
+    function updateUITexts() {
+      const t = translations[currentLang];
+      elements.title.textContent = t.title;
+      elements.languageLabel.textContent = t.language;
+      elements.modelLabel.textContent = t.model;
+      elements.regionLabel.textContent = t.region;
+      elements.regionSelect.innerHTML = '';
+      regionOptions.forEach(key => {
+        const option = document.createElement('option');
+        option.value = key;
+        option.textContent = t.regions[key];
+        elements.regionSelect.appendChild(option);
+      });
+      const savedRegion = localStorage.getItem('selectedRegion') || 'axis1';
+      elements.regionSelect.value = savedRegion;
+    }
+
+    async function fetchForecastPressure(loc, model) {
+      const url = `https://api.open-meteo.com/v1/${model}?latitude=${loc.lat}&longitude=${loc.lon}&hourly=pressure_msl&timezone=auto`;
+      const res = await fetch(url);
+      return (await res.json()).hourly;
+    }
+
+    async function fetchLivePressure(loc) {
+      const url = `https://api.openweathermap.org/data/2.5/weather?lat=${loc.lat}&lon=${loc.lon}&appid=${OPENWEATHER_API_KEY}&units=metric`;
+      const res = await fetch(url);
+      const data = await res.json();
+      return data.main.pressure;
+    }
+
+    async function getData() {
+      const model = document.getElementById('model-select').value;
+      const t = translations[currentLang];
+
+      const [annecyF, aostaF, zurichF, comoF, innsbruckF, bolzanoF] = await Promise.all([
+        fetchForecastPressure(locations.annecy, model),
+        fetchForecastPressure(locations.aosta, model),
+        fetchForecastPressure(locations.zurich, model),
+        fetchForecastPressure(locations.como, model),
+        fetchForecastPressure(locations.innsbruck, model),
+        fetchForecastPressure(locations.bolzano, model)
+      ]);
+
+      const [annecyL, aostaL, zurichL, comoL, innsbruckL, bolzanoL] = await Promise.all([
+        fetchLivePressure(locations.annecy),
+        fetchLivePressure(locations.aosta),
+        fetchLivePressure(locations.zurich),
+        fetchLivePressure(locations.como),
+        fetchLivePressure(locations.innsbruck),
+        fetchLivePressure(locations.bolzano)
+      ]);
+
+      const time = annecyF.time;
+      const localISOHour = new Date().toLocaleString('sv-SE', { hour12: false }).slice(0, 13).replace(' ', 'T');
+      const nowIndex = time.findIndex(t => t.startsWith(localISOHour));
+      const maxAbs = 12;
+
+      chartData = {
+        labels: time,
+        nowIndex,
+        maxAbs,
+        axis1: {
+          label: t.regions.axis1,
+          data: annecyF.pressure_msl.map((v, i) => v - aostaF.pressure_msl[i]),
+          liveDiff: annecyL - aostaL
+        },
+        axis2: {
+          label: t.regions.axis2,
+          data: zurichF.pressure_msl.map((v, i) => v - comoF.pressure_msl[i]),
+          liveDiff: zurichL - comoL
+        },
+        axis3: {
+          label: t.regions.axis3,
+          data: innsbruckF.pressure_msl.map((v, i) => v - bolzanoF.pressure_msl[i]),
+          liveDiff: innsbruckL - bolzanoL
+        }
+      };
+
+      createChart(elements.regionSelect.value);
+    }
+
+    function createChart(key) {
+      const { labels, nowIndex, maxAbs } = chartData;
+      const { data, label, liveDiff } = chartData[key];
+      const [city1, city2] = label.split(' – ');
+      const t = translations[currentLang];
+
+      if (mainChart) mainChart.destroy();
+
+      mainChart = new Chart(document.getElementById('mainChart'), {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: t.chartLabel(label),
+              data,
+              borderColor: 'blue',
+              tension: 0.1
+            },
+            {
+              label: t.liveDiff,
+              data: labels.map((_, i) => i === nowIndex ? liveDiff : null),
+              borderColor: 'red',
+              pointBackgroundColor: 'red',
+              borderWidth: 2,
+              pointRadius: 6,
+              type: 'line',
+              showLine: false
+            }
+          ]
+        },
+        options: {
+          scales: {
+            x: {
+              title: { display: true, text: t.xTitle },
+              ticks: {
+                callback: function(value) {
+                  const label = this.getLabelForValue(value) || value;
+                  return typeof label === 'string' ? label.replace('T', ' ') : label;
+                }
+              }
+            },
+            y: {
+              min: -maxAbs,
+              max: maxAbs,
+              title: { display: true, text: t.yTitle },
+              ticks: { stepSize: 1 }
+            }
+          },
+          plugins: {
+            legend: {
+              display: true,
+              onClick: null
+            },
+            tooltip: {
+              callbacks: {
+                title: function(tooltipItems) {
+                  const label = tooltipItems[0].label || '';
+                  return label.replace('T', ' ');
+                }
+              }
+            },
+            annotation: {
+              annotations: {
+                zeroLine: {
+                  type: 'line', yMin: 0, yMax: 0,
+                  borderColor: 'black', borderWidth: 1, borderDash: [4, 4]
+                },
+                greenZone: {
+                  type: 'box', yMin: -2, yMax: 2,
+                  backgroundColor: 'rgba(144, 238, 144, 0.2)',
+                  borderWidth: 0,
+                  label: { content: t.zones.safe, enabled: true, position: 'center', color: 'green', font: {size: 40}}
+                },
+                yellowZonePositive: {
+                  type: 'box', yMin: 2, yMax: 4,
+                  backgroundColor: 'rgba(255, 255, 0, 0.2)',
+                  borderWidth: 0
+                },
+                yellowZoneNegative: {
+                  type: 'box', yMin: -4, yMax: -2,
+                  backgroundColor: 'rgba(255, 255, 0, 0.2)',
+                  borderWidth: 0
+                },
+                redZonePositive: {
+                  type: 'box', yMin: 4, yMax: maxAbs,
+                  backgroundColor: 'rgba(255, 0, 0, 0.1)',
+                  borderWidth: 0,
+                  label: { content: t.zones.redHigh(city2), enabled: true, color: 'red', font: {size: 32}}
+                },
+                redZoneNegative: {
+                  type: 'box', yMin: -maxAbs, yMax: -4,
+                  backgroundColor: 'rgba(255, 0, 0, 0.1)',
+                  borderWidth: 0,
+                  label: { content: t.zones.redLow(city1), enabled: true, color: 'red', font: {size: 32}}
+                },
+                currentTimeMarker: {
+                  type: 'line', xMin: nowIndex, xMax: nowIndex,
+                  borderColor: 'green', borderWidth: 2, borderDash: [2, 2],
+                  label: {
+                    enabled: true, content: t.zones.now, position: 'start',
+                    backgroundColor: 'rgba(0,128,0,0.2)', color: 'green'
+                  }
+                }
+              }
+            }
+          }
+        },
+        plugins: [Chart.registry.getPlugin('annotation')]
+      });
+    }
+
+    function updateCountdown() {
+      const now = new Date();
+      const msUntilNextHour = ((60 - now.getMinutes()) * 60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+      function tick() {
+        const secs = Math.floor(msUntilNextHour / 1000 - (Date.now() - now.getTime()) / 1000);
+        if (secs > 0) {
+          const minutes = Math.floor(secs / 60);
+          const seconds = secs % 60;
+          elements.refreshTimer.textContent = translations[currentLang].refresh(minutes, seconds);
+          requestAnimationFrame(tick);
+        }
+      }
+      tick();
+      setTimeout(() => location.reload(), msUntilNextHour);
+    }
+
+    document.getElementById('region-select').addEventListener('change', e => {
+      localStorage.setItem('selectedRegion', e.target.value);
+      createChart(e.target.value);
+    });
+
+    document.getElementById('model-select').addEventListener('change', () => {
+      localStorage.setItem('selectedModel', document.getElementById('model-select').value);
+      getData();
+    });
+
+    document.getElementById('language-select').addEventListener('change', e => {
+      currentLang = e.target.value;
+      localStorage.setItem('lang', currentLang);
+      updateUITexts();
+      getData();
+    });
+
+    document.getElementById('language-select').value = currentLang;
+    document.getElementById('model-select').value = localStorage.getItem('selectedModel') || 'gfs';
+    updateUITexts();
+    updateCountdown();
+    getData();
+  </script>
+</body>
+</html>
