@@ -53,8 +53,8 @@
         yTitle: 'hPa differential',
         zones: {
           safe: 'Safe to Fly',
-          redHigh: (city) => `${city} DO NOT FLY!`,
-          redLow: (city) => `${city} DO NOT FLY!`,
+          redHigh: (city) => `${city} DO NOT FLY?`,
+          redLow: (city) => `${city} DO NOT FLY?`,
           now: 'Now'
         },
         refresh: (m, s) => `Auto-refresh in ${m}m ${s < 10 ? '0' : ''}${s}s`
@@ -75,8 +75,8 @@
         yTitle: 'Différentiel hPa',
         zones: {
           safe: 'Vol possible',
-          redHigh: (city) => `${city} NE PAS VOLER !`,
-          redLow: (city) => `${city} NE PAS VOLER !`,
+          redHigh: (city) => `${city} NE PAS VOLER ?`,
+          redLow: (city) => `${city} NE PAS VOLER ?`,
           now: 'Maintenant'
         },
         refresh: (m, s) => `Rafraîchissement automatique dans ${m}m ${s < 10 ? '0' : ''}${s}s`
@@ -97,8 +97,8 @@
         yTitle: 'hPa-Differenz',
         zones: {
           safe: 'Flugbedingungen gut',
-          redHigh: (city) => `${city} NICHT FLIEGEN!`,
-          redLow: (city) => `${city} NICHT FLIEGEN!`,
+          redHigh: (city) => `${city} NICHT FLIEGEN?`,
+          redLow: (city) => `${city} NICHT FLIEGEN?`,
           now: 'Jetzt'
         },
         refresh: (m, s) => `Automatische Aktualisierung in ${m}m ${s < 10 ? '0' : ''}${s}s`
